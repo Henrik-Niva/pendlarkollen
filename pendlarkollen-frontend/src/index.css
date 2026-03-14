@@ -1,0 +1,191 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap");
+
+/* =========================================================
+   ROOT / BASE
+   ========================================================= */
+
+html,
+body,
+#root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+}
+
+:root {
+    --brand-blue: rgb(19, 26, 239);
+  font-family: system-ui, Avenir, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  color: rgba(255, 255, 255, 0.87);
+  background-color: #242424;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* =========================================================
+   Stopbrowse sidepanel – matcha searchbar
+   ========================================================= */
+
+#stopbrowse-sidepanel {
+  background: rgba(242, 242, 242, 0.7) !important;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+
+  border-radius: 16px;
+  border: 1px solid rgba(0,0,0,0.10);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.15);
+
+  overflow: hidden; /* så rundningen syns även om barn har egen bakgrund */
+}
+
+/* Om innehållet (barnet) har vit bakgrund: neutralisera den */
+#stopbrowse-sidepanel > * {
+  background: transparent !important;
+}
+
+/* Om buildStationPopup sätter white på cards/section: låt dem vara vita (behåll kort-känslan) */
+#stopbrowse-sidepanel > * .stopbrowse-section {
+  background: white;
+}
+
+/* =========================================================
+   TEXT / LINKS
+   ========================================================= */
+
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: inherit;
+}
+
+a:hover {
+  color: #535bf2;
+}
+
+h1 {
+  font-size: 3.2em;
+  line-height: 1.1;
+}
+
+/* =========================================================
+   BODY
+   ========================================================= */
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+/* =========================================================
+   GENERIC BUTTON RESET (VIKTIG DEL)
+   ========================================================= */
+
+/*
+  Den här stilen gäller bara "nakna" knappar.
+  Alla riktiga UI-knappar (pickerMainBtn, slotBtn, uiPill etc)
+  stylas i App.css.
+*/
+
+button {
+  font-family: inherit;
+  font-size: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  color: inherit;
+}
+
+/* =========================================================
+   HOVER – endast för knappar UTAN app-klasser
+   ========================================================= */
+
+button:hover:not(.pickerMainBtn)
+             :not(.slotBtn)
+             :not(.listItem)
+             :not(.searchModeBtn)
+             :not(.operatorChoiceBtn)
+             :not(.uiPill) {
+  border-color: #646cff;
+}
+
+/* =========================================================
+   FOCUS – stäng av global browser-ring
+   (vi hanterar fokus i App.css)
+   ========================================================= */
+
+button:focus,
+button:focus-visible {
+  outline: none;
+}
+
+/* =========================================================
+   LIGHT MODE
+   ========================================================= */
+
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #213547;
+    background-color: #ffffff;
+  }
+
+  a:hover {
+    color: #747bff;
+  }
+}
+
+/* =========================================================
+   MapLibre popups – matcha searchbar glas-bakgrund
+   ========================================================= */
+
+.maplibregl-popup-content {
+  background: rgba(242, 242, 242, 0.7) !important;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+
+  border-radius: 16px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(0, 0, 0, 0.10);
+}
+
+/* (Valfritt) lite mer luft som känns som panelen */
+.maplibregl-popup-content {
+  padding: 14px 14px;
+}
+
+/* Om “spetsen” (tip) känns för vit, matcha den också */
+.maplibregl-popup-tip {
+  border-top-color: rgba(242, 242, 242, 0.7) !important;
+  border-bottom-color: rgba(242, 242, 242, 0.7) !important;
+}
+
+/* =========================================================
+   Route hover popup – lättare tooltip-känsla
+   ========================================================= */
+
+.route-hover-popup .maplibregl-popup-content {
+  padding: 8px 10px;
+  border-radius: 10px;
+
+  background: rgba(255, 255, 255, 0.82) !important;
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+
+  border: 1px solid rgba(0, 0, 0, 0.10);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+}
+
+.route-hover-popup .maplibregl-popup-tip {
+  border-top-color: rgba(255, 255, 255, 0.88) !important;
+  border-bottom-color: rgba(255, 255, 255, 0.88) !important;
+}
+
+.route-hover-popup {
+  pointer-events: none;
+}
