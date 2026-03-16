@@ -14,7 +14,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
-        "https://DIN-FRONTEND-URL.vercel.app",
+        "https://pendlarkollen.vercel.app",
     ],
     allow_credentials=False,
     allow_methods=["*"],
