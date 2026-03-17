@@ -64,6 +64,7 @@ export default function MapView(props: Props) {
     onVehicleRealtimeWarningChange,
   } = props;
 
+  const IS_PROD = import.meta.env.PROD;
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const intervalRef = useRef<number | undefined>(undefined);
@@ -392,22 +393,28 @@ export default function MapView(props: Props) {
     map.fitBounds(bounds, { padding: 70, duration: 600, maxZoom: 16 });
   }, [mapReady, fitNonce, fitSlot]);
 
-  // ==========================================
   // 9) Browse-lines: routes-all (race-safe)
-  // ==========================================
+  // Tillfälligt avstängt i production för att avlasta backend
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !mapReady) return;
 
-    // Inte i browse-lines -> göm och reset
     if (mapMode !== "browse-lines") {
       setBrowseLinesVisibility(map, { showAll: false });
       resetBrowseLinesFilters(map);
       return;
     }
 
-    // Ingen vald operatör ännu -> ladda inget alls
     if (enabledOperators.length === 0) {
+      setBrowseLinesVisibility(map, { showAll: false });
+      resetBrowseLinesFilters(map);
+      loadedAllRoutesOperatorRef.current = null;
+      return;
+    }
+
+    // Production guard:
+    // undvik att hämta alla linjer live tills backend är optimerad
+    if (IS_PROD) {
       setBrowseLinesVisibility(map, { showAll: false });
       resetBrowseLinesFilters(map);
       loadedAllRoutesOperatorRef.current = null;
