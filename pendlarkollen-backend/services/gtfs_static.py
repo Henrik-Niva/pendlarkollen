@@ -11,6 +11,11 @@ from fastapi import HTTPException
 
 from services.config import BASE, DEV_MODE, TRAFIKLAB_KEY_STATIC
 
+import os
+
+CACHE_DIR = "/tmp/gtfs_cache"
+os.makedirs(CACHE_DIR, exist_ok=True)
+
 # ===== CACHES =====
 
 ROUTES_CACHE: Dict[str, Dict[str, str]] = {}  # operator -> { route_id -> route_short_name }
@@ -91,38 +96,26 @@ def is_within_window(dep_sec: int, now_sec: int, window_sec: int) -> bool:
 # ===== ZIP =====
 
 def get_gtfs_zip_bytes(operator: str) -> bytes:
-    """
-    Hämtar GTFS zip (static).
-
-    Optimering:
-    - vi cachear bara EN operator-zip åt gången i RAM
-    - om en annan operator efterfrågas skrivs föregående över
-    """
-    global GTFS_ZIP_CACHE_OPERATOR, GTFS_ZIP_CACHE_ENTRY
-
     if DEV_MODE:
         return b""
 
-    now = time.time()
+    path = os.path.join(CACHE_DIR, f"{operator}.zip")
 
-    if GTFS_ZIP_CACHE_OPERATOR == operator and GTFS_ZIP_CACHE_ENTRY is not None:
-        ts, data = GTFS_ZIP_CACHE_ENTRY
-        if now - ts < GTFS_ZIP_TTL_SECONDS:
-            return data
+    # om fil finns och är färsk → använd den
+    if os.path.exists(path):
+        age = time.time() - os.path.getmtime(path)
+        if age < GTFS_ZIP_TTL_SECONDS:
+            with open(path, "rb") as f:
+                return f.read()
 
+    # annars: hämta ny
     url = f"{BASE}/gtfs/{operator}/{operator}.zip?key={TRAFIKLAB_KEY_STATIC}"
     r = requests.get(url, timeout=30)
 
-    # Robust backoff vid rate limit
+    # enkel retry vid rate limit
     if r.status_code == 429:
-        for attempt in range(4):  # max ~2+4+8+16 = 30s
-            retry_after = r.headers.get("Retry-After")
-            if retry_after and retry_after.isdigit():
-                wait_s = int(retry_after)
-            else:
-                wait_s = 2 ** (attempt + 1)  # 2,4,8,16
-
-            time.sleep(wait_s)
+        for attempt in range(4):
+            time.sleep(2 ** (attempt + 1))
             r = requests.get(url, timeout=30)
             if r.status_code != 429:
                 break
@@ -130,10 +123,11 @@ def get_gtfs_zip_bytes(operator: str) -> bytes:
     if r.status_code != 200:
         raise HTTPException(status_code=502, detail=f"GTFS static misslyckades: {r.status_code}")
 
-    GTFS_ZIP_CACHE_OPERATOR = operator
-    GTFS_ZIP_CACHE_ENTRY = (now, r.content)
-    return r.content
+    # spara till disk
+    with open(path, "wb") as f:
+        f.write(r.content)
 
+    return r.content
 
 # ===== ROUTES =====
 
