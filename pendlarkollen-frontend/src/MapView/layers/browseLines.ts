@@ -1,6 +1,6 @@
 import maplibregl from "maplibre-gl";
+import type { FeatureCollection, LineString } from "geojson";
 import type { Operator } from "../data/types";
-import { fetchAllRoutesFromBackend } from "../data/fetchRoutes";
 import { toOperatorCode } from "../utils/operatorCode";
 import { EMPTY_ROUTE_FC } from "../data/empties";
 
@@ -36,6 +36,20 @@ export function setBrowseLinesVisibility(map: maplibregl.Map, opts: { showAll: b
 
 let lastRequestedOperator: string | null = null;
 
+async function fetchAllRoutesFromStaticFile(
+  operator: Operator
+): Promise<FeatureCollection<LineString>> {
+  const op = toOperatorCode(operator); // "sl" / "ul" / "xt"
+  const url = `/generated/${op}_routes.geojson`;
+
+  const res = await fetch(url, { cache: "no-cache" });
+  if (!res.ok) {
+    throw new Error(`Failed to load static browse routes: ${res.status} ${res.statusText}`);
+  }
+
+  return (await res.json()) as FeatureCollection<LineString>;
+}
+
 export async function updateAllRoutesData(
   map: maplibregl.Map,
   operator: Operator
@@ -47,7 +61,7 @@ export async function updateAllRoutesData(
   lastRequestedOperator = requestOp;
 
   try {
-    const fc = await fetchAllRoutesFromBackend({ operator });
+    const fc = await fetchAllRoutesFromStaticFile(operator);
 
     // Ignorera sent svar för gammal operatör
     if (lastRequestedOperator !== requestOp) {
@@ -58,7 +72,8 @@ export async function updateAllRoutesData(
   } catch (e) {
     console.error("updateAllRoutesData failed:", e);
 
-    // Vid fel: behåll gammal data – töm inte
+    // Vid fel: töm browse-lines så vi slipper gammal/fel operator-data
+    src.setData(EMPTY_ROUTE_FC as any);
   }
 }
 
