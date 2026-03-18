@@ -716,3 +716,54 @@ def pick_trip_id_for_line_near_now(operator: str, line: str, window_min: int = 1
                 best_trip = trip_id
 
     return best_trip
+
+def get_active_lines_for_stop_ids(operator: str, stop_ids: list[str], window_min: int = 120) -> Set[str]:
+    """
+    Returnerar mängden linjer som har avgångar nära nu för givna stop_ids.
+    Räknar direkt för just dessa stop_ids i stället för att bygga ett stort globalt index.
+    """
+
+    if DEV_MODE:
+        return set()
+
+    if window_min < 5:
+        window_min = 5
+    if window_min > 12 * 60:
+        window_min = 12 * 60
+
+    stop_id_set = {s.strip() for s in stop_ids if (s or "").strip()}
+    if not stop_id_set:
+        return set()
+
+    route_map = load_routes_for_operator(operator)
+    trip_to_route = load_trips_for_operator(operator)
+    trip_to_service = load_trip_services_for_operator(operator)
+    active_services = get_active_service_ids_for_operator(operator)
+    stop_times_t = load_stop_times_with_times_for_operator(operator)
+
+    now_sec = now_seconds_stockholm()
+    window_sec = window_min * 60
+
+    lines_set: Set[str] = set()
+
+    for trip_id, seq_list in stop_times_t.items():
+        service_id = trip_to_service.get(trip_id)
+        if not service_id or service_id not in active_services:
+            continue
+
+        route_id = trip_to_route.get(trip_id)
+        if not route_id:
+            continue
+
+        line_short = (route_map.get(route_id) or "").strip()
+        if not line_short:
+            continue
+
+        for _seq, stop_id, dep_sec in seq_list:
+            if stop_id not in stop_id_set:
+                continue
+            if is_within_window(dep_sec, now_sec, window_sec):
+                lines_set.add(line_short)
+                break
+
+    return lines_set
