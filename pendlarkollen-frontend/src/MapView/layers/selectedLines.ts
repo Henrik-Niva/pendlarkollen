@@ -90,6 +90,9 @@ export async function updateSelectedLineLayers(opts: {
 
   const fetchedRoutes: Partial<Record<0 | 1 | 2, GeoJSON.FeatureCollection<GeoJSON.LineString>>> = {};
 
+  // =========================
+  // PASS 1: rendera routes direkt
+  // =========================
   await Promise.all(
     slots.map(async (slot) => {
       const sel = selectedLines[slot];
@@ -97,30 +100,59 @@ export async function updateSelectedLineLayers(opts: {
 
       const line = sel.line.trim();
 
-      const [variants, stopsFc] = await Promise.all([
-        fetchRouteVariants(sel.operator),
-        fetchStopsFromBackend({ operator: sel.operator, line }),
-      ]);
+      try {
+        const variants = await fetchRouteVariants(sel.operator);
 
-      if (cancelledRef.current) return;
+        if (cancelledRef.current) return;
 
-      const variant = pickBestVariant(variants, line);
+        const variant = pickBestVariant(variants, line);
 
-      const routeFc = variant
-        ? buildRouteFeatureCollectionFromVariant(sel, variant)
-        : EMPTY_ROUTE_FC;
+        const routeFc = variant
+          ? buildRouteFeatureCollectionFromVariant(sel, variant)
+          : EMPTY_ROUTE_FC;
 
-      setRoute(map, slot, routeFc);
-      setStops(map, slot, stopsFc ?? EMPTY_STOPS_FC);
-
-      fetchedRoutes[slot] = routeFc;
+        setRoute(map, slot, routeFc);
+        fetchedRoutes[slot] = routeFc;
+      } catch (err) {
+        console.error(`Selected route offline load failed for slot ${slot}:`, err);
+        if (cancelledRef.current) return;
+        setRoute(map, slot, EMPTY_ROUTE_FC);
+        fetchedRoutes[slot] = EMPTY_ROUTE_FC;
+      }
     })
   );
 
   if (cancelledRef.current) return;
 
+  // Fit så fort route finns, vänta inte på stops
   if (fitSlot !== null && fitSlot !== undefined) {
     const fc = fetchedRoutes[fitSlot];
     if (fc) fitToRoute(map, fc);
   }
+
+  // =========================
+  // PASS 2: ladda stops separat
+  // =========================
+  void Promise.all(
+    slots.map(async (slot) => {
+      const sel = selectedLines[slot];
+      if (!sel) return;
+
+      const line = sel.line.trim();
+
+      try {
+        const stopsFc = await fetchStopsFromBackend({
+          operator: sel.operator,
+          line,
+        });
+
+        if (cancelledRef.current) return;
+        setStops(map, slot, stopsFc ?? EMPTY_STOPS_FC);
+      } catch (err) {
+        console.error(`Selected stops live load failed for slot ${slot}:`, err);
+        if (cancelledRef.current) return;
+        setStops(map, slot, EMPTY_STOPS_FC);
+      }
+    })
+  );
 }
