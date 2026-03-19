@@ -1,9 +1,9 @@
 import maplibregl from "maplibre-gl";
 import type * as GeoJSON from "geojson";
 import type { LineSelection } from "../data/types";
-import { fetchRouteFromBackend } from "../data/fetchRoutes";
 import { fetchStopsFromBackend } from "../data/fetchStops";
-import { toOperatorCode } from "../utils/operatorCode";
+import { fetchRouteVariants } from "../data/fetchRouteVariants";
+import { pickBestVariant } from "../data/pickVariant";
 
 function setRoute(map: maplibregl.Map, slot: 0 | 1 | 2, fc: any) {
   const src = map.getSource(`routes-slot${slot}`) as maplibregl.GeoJSONSource | undefined;
@@ -38,14 +38,42 @@ function fitToRoute(map: maplibregl.Map, fc: GeoJSON.FeatureCollection<GeoJSON.L
   map.fitBounds(bounds, { padding: 60, duration: 600 });
 }
 
+function buildRouteFeatureCollectionFromVariant(
+  sel: LineSelection,
+  variant: {
+    variant_id: string;
+    direction_id: number | null;
+    headsign: string;
+    shape_id: string;
+    geometry: GeoJSON.LineString;
+  }
+): GeoJSON.FeatureCollection<GeoJSON.LineString> {
+  return {
+    type: "FeatureCollection",
+    features: [
+      {
+        type: "Feature",
+        geometry: variant.geometry,
+        properties: {
+          operator: sel.operator,
+          line: sel.line,
+          variant_id: variant.variant_id,
+          direction_id: variant.direction_id,
+          headsign: variant.headsign,
+          shape_id: variant.shape_id,
+          geometry_source: "offline-route-variants",
+        },
+      },
+    ],
+  };
+}
+
 export async function updateSelectedLineLayers(opts: {
   map: maplibregl.Map;
   selectedLines: LineSelection[];
   EMPTY_ROUTE_FC: GeoJSON.FeatureCollection<GeoJSON.LineString>;
   EMPTY_STOPS_FC: GeoJSON.FeatureCollection<GeoJSON.Point>;
   cancelledRef: { current: boolean };
-
-  // ✅ new: fit the latest changed slot
   fitSlot?: 0 | 1 | 2 | null;
 }) {
   const { map, selectedLines, EMPTY_ROUTE_FC, EMPTY_STOPS_FC, cancelledRef, fitSlot } = opts;
@@ -60,7 +88,6 @@ export async function updateSelectedLineLayers(opts: {
     }
   }
 
-  // Fetch + set for present slots
   const fetchedRoutes: Partial<Record<0 | 1 | 2, GeoJSON.FeatureCollection<GeoJSON.LineString>>> = {};
 
   await Promise.all(
@@ -68,26 +95,30 @@ export async function updateSelectedLineLayers(opts: {
       const sel = selectedLines[slot];
       if (!sel) return;
 
-      const operatorCode = toOperatorCode(sel.operator);
       const line = sel.line.trim();
 
-      const [routeFc, stopsFc] = await Promise.all([
-        fetchRouteFromBackend({ operator: operatorCode, line }),
-        fetchStopsFromBackend({ operator: operatorCode, line }),
+      const [variants, stopsFc] = await Promise.all([
+        fetchRouteVariants(sel.operator),
+        fetchStopsFromBackend({ operator: sel.operator, line }),
       ]);
 
       if (cancelledRef.current) return;
 
-      setRoute(map, slot, routeFc ?? EMPTY_ROUTE_FC);
+      const variant = pickBestVariant(variants, line);
+
+      const routeFc = variant
+        ? buildRouteFeatureCollectionFromVariant(sel, variant)
+        : EMPTY_ROUTE_FC;
+
+      setRoute(map, slot, routeFc);
       setStops(map, slot, stopsFc ?? EMPTY_STOPS_FC);
 
-      fetchedRoutes[slot] = (routeFc ?? EMPTY_ROUTE_FC) as any;
+      fetchedRoutes[slot] = routeFc;
     })
   );
 
   if (cancelledRef.current) return;
 
-  // ✅ Fit to chosen slot (latest changed), if provided and available
   if (fitSlot !== null && fitSlot !== undefined) {
     const fc = fetchedRoutes[fitSlot];
     if (fc) fitToRoute(map, fc);
