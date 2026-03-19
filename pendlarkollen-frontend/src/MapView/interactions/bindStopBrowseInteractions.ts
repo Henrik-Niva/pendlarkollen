@@ -24,63 +24,36 @@
 import maplibregl from "maplibre-gl";
 import type * as GeoJSON from "geojson";
 import type { Operator, LineSelection, MapMode, FocusedStop } from "../data/types";
-import {
-  fetchAllStopsFromBackend,
-  fetchLinesByParentStationActiveFromBackend,
-} from "../data/fetchStops";
 import { buildStationPopup } from "../popups/buildStationPopup";
 import { harvestPlatformLabel } from "../utils/harvestPlatformLabel";
 import { EMPTY_POINT_FC } from "../data/empties";
 import { toOperatorCode } from "../utils/operatorCode";
 import { ensureSidePanel, removeSidePanel } from "../popups/ensureSidePanel";
+import {
+  fetchStopsIndex,
+  type StopsIndexFile,
+  type StopsIndexChild,
+} from "../data/fetchStopsIndex";
 
-// ---- cache stops/all per operatorCode ----
-type StopMeta = {
-  name: string;
-  platform_code?: string;
-  parent_station?: string;
-  location_type?: number;
-  lon?: number;
-  lat?: number;
-};
+// ---- cache stops index per operatorCode ----
+const stopsIndexCache = new Map<string, Promise<StopsIndexFile>>();
 
-const stopIndexCache = new Map<string, Promise<Map<string, StopMeta>>>();
-
-async function getStopIndex(operatorCode: string) {
+async function getStopsIndex(operatorCode: string) {
   const key = operatorCode.toLowerCase();
 
-  const cached = stopIndexCache.get(key);
+  const cached = stopsIndexCache.get(key);
   if (cached) return cached;
 
-  const p = (async () => {
-    const allStopsFc = await fetchAllStopsFromBackend({ operator: key });
+  const p = fetchStopsIndex(
+    key === "ul" ? "UL" : key === "sl" ? "SL" : "X-trafik"
+  );
 
-    const idx = new Map<string, StopMeta>();
-    for (const f of allStopsFc.features ?? []) {
-      const sid = String((f as any)?.properties?.stop_id ?? "").trim();
-      if (!sid) continue;
-
-      const geom = (f as any)?.geometry;
-      const coords = geom?.type === "Point" ? (geom.coordinates as [number, number]) : null;
-
-      idx.set(sid, {
-        name: String((f as any)?.properties?.name ?? "").trim(),
-        platform_code: String((f as any)?.properties?.platform_code ?? "").trim(),
-        parent_station: String((f as any)?.properties?.parent_station ?? "").trim(),
-        location_type: Number((f as any)?.properties?.location_type ?? 0),
-        lon: coords ? Number(coords[0]) : undefined,
-        lat: coords ? Number(coords[1]) : undefined,
-      });
-    }
-    return idx;
-  })();
-
-  stopIndexCache.set(key, p);
+  stopsIndexCache.set(key, p);
   return p;
 }
 
 export function _clearStopIndexCache() {
-  stopIndexCache.clear();
+  stopsIndexCache.clear();
 }
 
 function normCoords(e: maplibregl.MapLayerMouseEvent, coords: [number, number]) {
@@ -344,33 +317,34 @@ export function bindStopBrowseInteractions(opts: {
   }): Promise<{ parentId: string; parentName: string; parentCoords: [number, number] } | null> {
     const { operatorCode, stop_id, name, coordinates } = opts2;
 
-    const idx = await getStopIndex(operatorCode);
-    const meta = idx.get(stop_id);
+    const data = await getStopsIndex(operatorCode);
 
-    if (!meta) {
-      const parentName = (name || "Okänd hållplats").trim();
-      const coords = coordinates ?? [0, 0];
-      return { parentId: stop_id, parentName, parentCoords: coords };
+    const childMeta = data.children?.[stop_id];
+    if (childMeta) {
+      const parentId = String(childMeta.parent_station || "").trim();
+      const parent = (data.parents ?? []).find((p) => p.stop_id === parentId);
+
+      return {
+        parentId,
+        parentName: parent?.name || name || "Okänd hållplats",
+        parentCoords: parent ? [parent.lon, parent.lat] : (coordinates ?? [0, 0]),
+      };
     }
 
-    const ps = String(meta.parent_station ?? "").trim();
-    const isParent = ps === "";
-
-    if (isParent) {
-      const parentName = (meta.name || name || "Okänd hållplats").trim();
-      const lon = meta.lon ?? (coordinates ? coordinates[0] : 0);
-      const lat = meta.lat ?? (coordinates ? coordinates[1] : 0);
-      return { parentId: stop_id, parentName, parentCoords: [lon, lat] };
+    const parent = (data.parents ?? []).find((p) => p.stop_id === stop_id);
+    if (parent) {
+      return {
+        parentId: parent.stop_id,
+        parentName: parent.name || name || "Okänd hållplats",
+        parentCoords: [parent.lon, parent.lat],
+      };
     }
 
-    const parentId = ps;
-    const pMeta = idx.get(parentId);
-
-    const parentName = (pMeta?.name || "Okänd hållplats").trim();
-    const lon = pMeta?.lon ?? (coordinates ? coordinates[0] : 0);
-    const lat = pMeta?.lat ?? (coordinates ? coordinates[1] : 0);
-
-    return { parentId, parentName, parentCoords: [lon, lat] };
+    return {
+      parentId: stop_id,
+      parentName: name || "Okänd hållplats",
+      parentCoords: coordinates ?? [0, 0],
+    };
   }
 
   // =========================================================
@@ -380,31 +354,27 @@ export function bindStopBrowseInteractions(opts: {
     operatorCode: string;
     parentId: string;
   }): Promise<Map<string, string>> {
-    const idx = await getStopIndex(params.operatorCode);
+    const data = await getStopsIndex(params.operatorCode);
 
-    const children: Array<{ stop_id: string; name: string; platform_code?: string }> = [];
+    const parent = (data.parents ?? []).find((p) => p.stop_id === params.parentId);
+    const childIds = parent?.children ?? [];
 
-    for (const [sid, meta] of idx.entries()) {
-      const ps = String(meta.parent_station ?? "").trim();
-      if (ps !== params.parentId) continue;
-      if (sid === params.parentId) continue;
+    const children: Array<{ stop_id: string; name: string }> = [];
+
+    for (const childId of childIds) {
+      const child = data.children?.[childId];
+      if (!child) continue;
 
       children.push({
-        stop_id: sid,
-        name: String(meta.name || "").trim(),
-        platform_code: String(meta.platform_code || "").trim() || undefined,
+        stop_id: child.stop_id,
+        name: String(child.name || "").trim(),
       });
     }
 
     children.sort((a, b) => {
-      const ap = a.platform_code || "";
-      const bp = b.platform_code || "";
-      if (ap && bp && ap !== bp) return ap.localeCompare(bp, "sv", { numeric: true });
-
       const an = a.name || "";
       const bn = b.name || "";
       if (an && bn && an !== bn) return an.localeCompare(bn, "sv");
-
       return a.stop_id.localeCompare(b.stop_id, "sv");
     });
 
@@ -459,7 +429,7 @@ export function bindStopBrowseInteractions(opts: {
     if (params.reuseCache && cachedParentSections.length > 0) {
       const dom = buildStationPopup({
         title: parentName,
-        countLabel: `Lägen med aktiva linjer (${cachedParentCount})`,
+        countLabel: `Lägen med linjer (${cachedParentCount})`,
         sections: cachedParentSections,
         onPickLine: (line: string) => {
           const sel: LineSelection = { operator: operatorForBrowse, line };
@@ -498,38 +468,34 @@ export function bindStopBrowseInteractions(opts: {
     }
 
     try {
+      const data = await getStopsIndex(operatorCode);
       const stableLetters = await getStableChildLetterMap({ operatorCode, parentId });
 
-      const rows = await fetchLinesByParentStationActiveFromBackend({
-        operator: operatorCode,
-        parent_station: parentId,
-        window_min: 120,
-      });
+      const parent = (data.parents ?? []).find((p) => p.stop_id === parentId);
+      const childIds = parent?.children ?? [];
 
-      const stopIndex = await getStopIndex(operatorCode);
+      const clean = childIds
+        .map((childId) => {
+          const child: StopsIndexChild | undefined = data.children?.[childId];
+          if (!child) return null;
 
-      const clean = (rows ?? [])
-        .map((r) => {
-          const lines = (r.lines ?? []).map((x) => String(x.line).trim()).filter(Boolean);
+          const childName = String(child.name || "").trim();
 
-          const childStopId = String(r.stop_id).trim();
-          const childMeta = stopIndex.get(childStopId);
-          const childName = (childMeta?.name || r.name || "").trim();
-
-          const harvested = harvestPlatformLabel(parentName, childName, childStopId, {
-            platform_code: childMeta?.platform_code,
-          });
-
-          const letter = stableLetters.get(childStopId) || "?";
+          const harvested = harvestPlatformLabel(parentName, childName, child.stop_id, {});
+          const letter = stableLetters.get(child.stop_id) || "?";
           const fullLabel = harvested ? `Läge ${letter} • ${harvested}` : `Läge ${letter}`;
 
           return {
-            ...r,
-            lines,
+            stop_id: child.stop_id,
+            name: child.name,
+            lat: child.lat,
+            lon: child.lon,
+            lines: [...(child.lines ?? [])],
             label: fullLabel,
             letter,
           };
         })
+        .filter((r): r is NonNullable<typeof r> => !!r)
         .filter((r) => r.lines.length > 0);
 
       if (clean.length === 0) {
@@ -542,7 +508,7 @@ export function bindStopBrowseInteractions(opts: {
 
         const dom = buildStationPopup({
           title: parentName,
-          countLabel: "Inga aktiva linjer just nu.",
+          countLabel: "Inga linjer just nu i offline-index.",
           sections: [],
           onPickLine: () => {},
         });
@@ -570,7 +536,7 @@ export function bindStopBrowseInteractions(opts: {
 
       const fc: GeoJSON.FeatureCollection<GeoJSON.Point> = {
         type: "FeatureCollection",
-        features: clean.map((r: any) => ({
+        features: clean.map((r) => ({
           type: "Feature",
           id: r.stop_id,
           geometry: { type: "Point", coordinates: [r.lon, r.lat] },
@@ -611,11 +577,11 @@ export function bindStopBrowseInteractions(opts: {
         });
       }
 
-      const sorted = [...clean].sort((a: any, b: any) =>
+      const sorted = [...clean].sort((a, b) =>
         String(a.label || a.stop_id).localeCompare(String(b.label || b.stop_id), "sv")
       );
 
-      const sections = sorted.slice(0, 40).map((r: any) => ({
+      const sections = sorted.slice(0, 40).map((r) => ({
         heading: r.label || r.stop_id,
         lines: r.lines,
         stop_id: String(r.stop_id),
@@ -626,7 +592,7 @@ export function bindStopBrowseInteractions(opts: {
 
       const dom = buildStationPopup({
         title: parentName,
-        countLabel: `Lägen med aktiva linjer (${clean.length})`,
+        countLabel: `Lägen med linjer (${clean.length})`,
         sections,
         onPickLine: (line: string) => {
           const sel: LineSelection = { operator: operatorForBrowse, line };
@@ -813,14 +779,9 @@ export function bindStopBrowseInteractions(opts: {
     const heading = String(params.heading || `Läge ${childStopId}`).trim();
 
     try {
-      const rows = await fetchLinesByParentStationActiveFromBackend({
-        operator: operatorCode,
-        parent_station: parentStationId,
-        window_min: 120,
-      });
-
-      const row = (rows ?? []).find((r) => String(r.stop_id).trim() === childStopId);
-      const lines = (row?.lines ?? []).map((x: any) => String(x.line).trim()).filter(Boolean);
+      const data = await getStopsIndex(operatorCode);
+      const child = data.children?.[childStopId];
+      const lines = [...(child?.lines ?? [])];
 
       closeChildPopup();
 
@@ -887,7 +848,6 @@ export function bindStopBrowseInteractions(opts: {
 
     const operatorForBrowse = enabledOperatorsRef.current[0] ?? "SL";
     const operatorCode = toOperatorCode(operatorForBrowse);
-    const parentStationId = activeParent.stop_id || String(feature.properties?.parent_station ?? "").trim();
 
     const rawLabel = String(feature.properties?.label ?? "").trim();
     const rawName = String(feature.properties?.name ?? "").trim();
@@ -896,14 +856,9 @@ export function bindStopBrowseInteractions(opts: {
     const coords = normCoords(e, (feature.geometry?.coordinates ?? [0, 0]) as [number, number]);
 
     try {
-      const rows = await fetchLinesByParentStationActiveFromBackend({
-        operator: operatorCode,
-        parent_station: parentStationId,
-        window_min: 120,
-      });
-
-      const row = (rows ?? []).find((r) => String(r.stop_id).trim() === childStopId);
-      const lines = (row?.lines ?? []).map((x: any) => String(x.line).trim()).filter(Boolean);
+      const data = await getStopsIndex(operatorCode);
+      const child = data.children?.[childStopId];
+      const lines = [...(child?.lines ?? [])];
 
       closeChildPopup();
 
