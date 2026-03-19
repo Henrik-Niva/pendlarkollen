@@ -2,8 +2,7 @@ import maplibregl from "maplibre-gl";
 import type * as GeoJSON from "geojson";
 
 import type { Operator, MapMode } from "../data/types";
-import { fetchAllStopsFromBackend } from "../data/fetchStops";
-import { toOperatorCode } from "../utils/operatorCode";
+import { fetchStopsIndex } from "../data/fetchStopsIndex";
 
 let lastReqId = 0;
 
@@ -19,35 +18,42 @@ export async function updateBrowseStopsStations(opts: {
   const stopsSrc = map.getSource("stops") as maplibregl.GeoJSONSource | undefined;
   if (!stopsSrc) return;
 
-  // Om vi inte är i browse-stops: töm (så vi aldrig “läcker” hållplatser mellan modes)
+  // Om vi inte är i browse-stops: töm
   if (mapMode !== "browse-stops") {
     stopsSrc.setData(EMPTY_POINT_FC as any);
     return;
   }
 
   const reqId = ++lastReqId;
-  const operatorCode = toOperatorCode(browseOperator);
 
   try {
-    const fc = await fetchAllStopsFromBackend({ operator: operatorCode });
+    const data = await fetchStopsIndex(browseOperator);
 
-    // Ignorera om något nyare request har startat, eller om vi avbrutit
     if (cancelledRef.current) return;
     if (reqId !== lastReqId) return;
 
-    // Endast parent-stationer: parent_station tom + location_type == 1
     const parentsOnly: GeoJSON.FeatureCollection<GeoJSON.Point> = {
       type: "FeatureCollection",
-      features: (fc.features ?? [])
-        .filter((f: any) => {
-          const ps = String(f?.properties?.parent_station ?? "").trim();
-          const lt = Number(f?.properties?.location_type ?? 0);
-          return ps === "" && lt === 1;
-        })
-        .map((f: any) => ({
-          ...f,
-          id: String(f?.properties?.stop_id ?? ""),
-        })),
+      features: (data.parents ?? []).map((p) => ({
+        type: "Feature",
+        id: p.stop_id,
+        geometry: {
+          type: "Point",
+          coordinates: [p.lon, p.lat],
+        },
+        properties: {
+          stop_id: p.stop_id,
+          name: p.name,
+          lat: p.lat,
+          lon: p.lon,
+          lines: p.lines,
+          children: p.children,
+          parent_station: "",
+          location_type: 1,
+          operator: browseOperator,
+          source: "offline-stops-index",
+        },
+      })),
     };
 
     stopsSrc.setData(parentsOnly as any);
