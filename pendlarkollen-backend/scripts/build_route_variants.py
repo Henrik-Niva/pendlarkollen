@@ -333,7 +333,7 @@ def build_variants(
         if len(seq_list) < 2:
             continue
 
-                stop_ids = build_stop_ids_for_trip(representative_trip_id, stop_times_by_trip)
+        stop_ids = build_stop_ids_for_trip(representative_trip_id, stop_times_by_trip)
         if len(stop_ids) < 2:
             continue
 
@@ -378,7 +378,6 @@ def build_variants(
         variants.append(variant)
 
     return variants
-
 
 def write_output(operator: str, payload: dict, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)

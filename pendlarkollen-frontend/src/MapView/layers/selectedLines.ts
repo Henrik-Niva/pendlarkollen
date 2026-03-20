@@ -1,9 +1,9 @@
 import maplibregl from "maplibre-gl";
 import type * as GeoJSON from "geojson";
 import type { LineSelection } from "../data/types";
-import { fetchStopsFromBackend } from "../data/fetchStops";
-import { fetchRouteVariants } from "../data/fetchRouteVariants";
+import { fetchRouteVariants, type RouteVariant } from "../data/fetchRouteVariants";
 import { pickBestVariant } from "../data/pickVariant";
+import { fetchStopsIndex } from "../data/fetchStopsIndex";
 
 function setRoute(map: maplibregl.Map, slot: 0 | 1 | 2, fc: any) {
   const src = map.getSource(`routes-slot${slot}`) as maplibregl.GeoJSONSource | undefined;
@@ -68,6 +68,70 @@ function buildRouteFeatureCollectionFromVariant(
   };
 }
 
+function buildStopsFeatureCollectionFromVariantStopIds(
+  sel: LineSelection,
+  variant: RouteVariant,
+  stopsIndex: Awaited<ReturnType<typeof fetchStopsIndex>>
+): GeoJSON.FeatureCollection<GeoJSON.Point> {
+  const parentById = new Map(
+    (stopsIndex.parents ?? []).map((p) => [p.stop_id, p] as const)
+  );
+
+  const features: GeoJSON.Feature<GeoJSON.Point>[] = [];
+
+  for (const stopId of variant.stop_ids ?? []) {
+    const child = stopsIndex.children?.[stopId];
+    if (child) {
+      features.push({
+        type: "Feature",
+        id: child.stop_id,
+        geometry: {
+          type: "Point",
+          coordinates: [child.lon, child.lat],
+        },
+        properties: {
+          stop_id: child.stop_id,
+          name: child.name,
+          lat: child.lat,
+          lon: child.lon,
+          parent_station: child.parent_station,
+          operator: sel.operator,
+          line: sel.line,
+          source: "offline-stops-index",
+        },
+      });
+      continue;
+    }
+
+    const parent = parentById.get(stopId);
+    if (parent) {
+      features.push({
+        type: "Feature",
+        id: parent.stop_id,
+        geometry: {
+          type: "Point",
+          coordinates: [parent.lon, parent.lat],
+        },
+        properties: {
+          stop_id: parent.stop_id,
+          name: parent.name,
+          lat: parent.lat,
+          lon: parent.lon,
+          parent_station: "",
+          operator: sel.operator,
+          line: sel.line,
+          source: "offline-stops-index",
+        },
+      });
+    }
+  }
+
+  return {
+    type: "FeatureCollection",
+    features,
+  };
+}
+
 export async function updateSelectedLineLayers(opts: {
   map: maplibregl.Map;
   selectedLines: LineSelection[];
@@ -90,9 +154,6 @@ export async function updateSelectedLineLayers(opts: {
 
   const fetchedRoutes: Partial<Record<0 | 1 | 2, GeoJSON.FeatureCollection<GeoJSON.LineString>>> = {};
 
-  // =========================
-  // PASS 1: rendera routes direkt
-  // =========================
   await Promise.all(
     slots.map(async (slot) => {
       const sel = selectedLines[slot];
@@ -101,7 +162,10 @@ export async function updateSelectedLineLayers(opts: {
       const line = sel.line.trim();
 
       try {
-        const variants = await fetchRouteVariants(sel.operator);
+        const [variants, stopsIndex] = await Promise.all([
+          fetchRouteVariants(sel.operator),
+          fetchStopsIndex(sel.operator),
+        ]);
 
         if (cancelledRef.current) return;
 
@@ -111,12 +175,21 @@ export async function updateSelectedLineLayers(opts: {
           ? buildRouteFeatureCollectionFromVariant(sel, variant)
           : EMPTY_ROUTE_FC;
 
+        const stopsFc = variant
+          ? buildStopsFeatureCollectionFromVariantStopIds(sel, variant, stopsIndex)
+          : EMPTY_STOPS_FC;
+
         setRoute(map, slot, routeFc);
+        setStops(map, slot, stopsFc);
+
         fetchedRoutes[slot] = routeFc;
       } catch (err) {
-        console.error(`Selected route offline load failed for slot ${slot}:`, err);
+        console.error(`Selected offline load failed for slot ${slot}:`, err);
         if (cancelledRef.current) return;
+
         setRoute(map, slot, EMPTY_ROUTE_FC);
+        setStops(map, slot, EMPTY_STOPS_FC);
+
         fetchedRoutes[slot] = EMPTY_ROUTE_FC;
       }
     })
@@ -124,35 +197,8 @@ export async function updateSelectedLineLayers(opts: {
 
   if (cancelledRef.current) return;
 
-  // Fit så fort route finns, vänta inte på stops
   if (fitSlot !== null && fitSlot !== undefined) {
     const fc = fetchedRoutes[fitSlot];
     if (fc) fitToRoute(map, fc);
   }
-
-  // =========================
-  // PASS 2: ladda stops separat
-  // =========================
-  void Promise.all(
-    slots.map(async (slot) => {
-      const sel = selectedLines[slot];
-      if (!sel) return;
-
-      const line = sel.line.trim();
-
-      try {
-        const stopsFc = await fetchStopsFromBackend({
-          operator: sel.operator,
-          line,
-        });
-
-        if (cancelledRef.current) return;
-        setStops(map, slot, stopsFc ?? EMPTY_STOPS_FC);
-      } catch (err) {
-        console.error(`Selected stops live load failed for slot ${slot}:`, err);
-        if (cancelledRef.current) return;
-        setStops(map, slot, EMPTY_STOPS_FC);
-      }
-    })
-  );
 }
