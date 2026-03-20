@@ -1,8 +1,8 @@
 import maplibregl from "maplibre-gl";
 import type { FeatureCollection, LineString } from "geojson";
 import type { Operator } from "../data/types";
-import { toOperatorCode } from "../utils/operatorCode";
 import { EMPTY_ROUTE_FC } from "../data/empties";
+import { fetchRouteVariants } from "../data/fetchRouteVariants";
 
 const BROWSE_LINE_LAYERS = [
   "routes-all-base-halo",
@@ -36,18 +36,28 @@ export function setBrowseLinesVisibility(map: maplibregl.Map, opts: { showAll: b
 
 let lastRequestedOperator: string | null = null;
 
-async function fetchAllRoutesFromStaticFile(
+async function fetchAllRoutesFromRouteVariants(
   operator: Operator
 ): Promise<FeatureCollection<LineString>> {
-  const op = toOperatorCode(operator); // "sl" / "ul" / "xt"
-  const url = `/generated/${op}_routes.geojson`;
+  const variants = await fetchRouteVariants(operator);
 
-  const res = await fetch(url, { cache: "no-cache" });
-  if (!res.ok) {
-    throw new Error(`Failed to load static browse routes: ${res.status} ${res.statusText}`);
-  }
-
-  return (await res.json()) as FeatureCollection<LineString>;
+  return {
+    type: "FeatureCollection",
+    features: variants.map((variant) => ({
+      type: "Feature",
+      geometry: variant.geometry,
+      properties: {
+        operator,
+        line: variant.line,
+        variant_id: variant.variant_id,
+        direction_id: variant.direction_id,
+        headsign: variant.headsign,
+        shape_id: variant.shape_id,
+        trip_count: variant.trip_count,
+        geometry_source: "offline-route-variants",
+      },
+    })),
+  };
 }
 
 export async function updateAllRoutesData(
@@ -61,7 +71,7 @@ export async function updateAllRoutesData(
   lastRequestedOperator = requestOp;
 
   try {
-    const fc = await fetchAllRoutesFromStaticFile(operator);
+    const fc = await fetchAllRoutesFromRouteVariants(operator);
 
     // Ignorera sent svar för gammal operatör
     if (lastRequestedOperator !== requestOp) {
@@ -77,13 +87,11 @@ export async function updateAllRoutesData(
   }
 }
 
-export function applyBrowseLinesOperatorFilter(map: maplibregl.Map, operator: Operator) {
-  const op = toOperatorCode(operator); // "sl" / "ul" / "xt"
-  const opMatch: any = ["==", ["downcase", ["get", "operator"]], op];
-
+export function applyBrowseLinesOperatorFilter(map: maplibregl.Map, _operator: Operator) {
+  // Behåll alla features synliga. Varje operator laddas nu från sin egen fil.
   for (const id of FILTERED_BROWSE_LINE_LAYERS) {
     if (!map.getLayer(id)) continue;
-    map.setFilter(id, opMatch);
+    map.setFilter(id, null);
   }
 }
 
