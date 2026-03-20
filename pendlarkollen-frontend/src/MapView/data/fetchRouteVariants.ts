@@ -24,8 +24,8 @@ export type RouteVariant = {
   service_ids: string[];
   sample_trip_ids: string[];
   has_time_data: boolean;
+  stop_ids: string[];
   geometry: GeoJSON.LineString;
-  stops: RouteVariantStop[];
 };
 
 type VariantFile = {
