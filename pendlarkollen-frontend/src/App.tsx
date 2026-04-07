@@ -429,7 +429,7 @@ export default function App() {
       <aside className="sidebar">
         <div className="sidebarFixedTop">
           <div className="brandBlock">
-            <h1 className="title">Pendlarkollen</h1>
+            <h1 className="title">Pendlarkartan</h1>
             <div className="appVersion">v{APP_VERSION}</div>
           </div>
           <div className="sidebarDivider" />
