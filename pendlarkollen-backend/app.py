@@ -15,6 +15,8 @@ app.add_middleware(
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "https://pendlarkollen.vercel.app",
+        "https://pendlarkartan.se",
+        "https://www.pendlarkartan.se",
     ],
     allow_credentials=False,
     allow_methods=["*"],
