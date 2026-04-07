@@ -7,7 +7,7 @@ from api.stops import router as stops_router
 from api.vehicles import router as vehicles_router
 from api.rt_status import router as rt_status_router
 
-app = FastAPI()
+app = FastAPI(title="Pendlarkartan API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -32,4 +32,4 @@ app.include_router(rt_status_router, prefix="/api")
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {"ok": True, "service": "Pendlarkartan API"}
