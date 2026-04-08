@@ -1,7 +1,7 @@
 {
-  "name": "pendlarkollen-frontend",
+  "name": "pendlarkartan-frontend",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.5.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
