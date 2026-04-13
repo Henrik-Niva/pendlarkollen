@@ -86,6 +86,20 @@ export function ensureVehicleDiamondIcon(map: maplibregl.Map) {
   map.addImage(IMAGE_ID, styleImage, { pixelRatio: 2 });
 }
 
+function isRealtimeMissingError(err: unknown): boolean {
+  const message = err instanceof Error ? err.message : String(err ?? "");
+  const lower = message.toLowerCase();
+
+  return (
+    lower.includes("503") ||
+    lower.includes("realtime") ||
+    lower.includes("vehiclepositions") ||
+    lower.includes("feed") ||
+    lower.includes("fordon") ||
+    lower.includes("vehicles")
+  );
+}
+
 function normalizeOperator(opRaw: string): Operator {
   const op = (opRaw || "").toLowerCase();
   return op === "ul" ? "UL" : op === "sl" ? "SL" : "X-trafik";
@@ -256,12 +270,10 @@ export function startVehicleUpdates(options: {
 
             return normalized;
           } catch (err: unknown) {
-            const message =
-              err instanceof Error ? err.message : String(err ?? "");
-
-            if (message.includes("503") || message.toLowerCase().includes("realtime")) {
+            if (isRealtimeMissingError(err)) {
               console.warn(
-                `[vehicles] realtime saknas för ${sel.operator} linje ${lineParam}`
+                `[vehicles] realtime saknas för ${sel.operator} linje ${lineParam}`,
+                err
               );
               missingRealtimeLines.push(`${sel.operator} linje ${lineParam}`);
               return [];
